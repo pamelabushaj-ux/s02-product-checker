@@ -5,6 +5,7 @@
 <title>S-02 | Kontrolli i produkteve</title>
 <style>
 *{box-sizing:border-box}body{margin:0;background:#f4f5ef;color:#132b25;font:16px/1.55 system-ui,sans-serif}header,main,footer{max-width:1120px;margin:auto;padding-inline:clamp(18px,5vw,58px)}header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding-block:20px;border-bottom:1px solid #c8d4c8}nav{display:flex;flex-wrap:wrap;gap:16px}a{color:#14503b}h1,h2{font-family:Georgia,serif;line-height:1.04;margin:.3em 0}h1{font-size:clamp(2.7rem,7vw,5.5rem);max-width:15ch}h2{font-size:clamp(2rem,4vw,3rem)}h3{margin:.2em 0}.intro{padding-block:42px 30px}.intro p{max-width:64ch}.section{margin-bottom:36px;padding:clamp(16px,3vw,34px);background:white;border:1px solid #d7dfd3;border-radius:16px}.form,.actions{display:flex;gap:12px;flex-wrap:wrap;align-items:end;margin:16px 0}label{display:grid;gap:5px;font-weight:650}input,select,button{font:inherit;border:1px solid #9aafa2;border-radius:7px;padding:.57rem .72rem;background:white;color:inherit;max-width:100%}button{cursor:pointer;background:#174b3a;color:white;border-color:#174b3a}button:disabled{opacity:.5;cursor:default}.listing{display:grid;grid-template-columns:minmax(130px,230px) 1fr;gap:24px;margin-top:24px}.listing img{width:100%;border-radius:9px;background:#eef0e9}.result{padding:16px 20px;background:#e8f2e9;border-radius:10px}.result p{margin:.35em 0}.muted{color:#4a6459}.tablewrap{overflow-x:auto}table{width:100%;border-collapse:collapse;text-align:left}th,td{padding:10px;border-bottom:1px solid #dbe4d8}th{background:#ebf1e9}footer{padding-bottom:25px}.prices{font-weight:700}details{margin-top:16px}@media(max-width:580px){.listing{grid-template-columns:1fr}.listing img{max-width:200px}.filters label{width:100%}}
+.photo-lookup{margin-block:24px}.photo-lookup input{max-width:100%}
 </style>
 <header><strong>S-02 · Sprint2Pilot</strong><nav><a href="#produkt">Kontrollo produktin</a><a href="#shites">Shitësit e sinjalizuar</a></nav></header>
 <main>
@@ -12,6 +13,15 @@
 <section class="section" id="produkt">
 <h2>Kontrollo produktin</h2>
 <form class="form" id="lookup"><label for="examples">Shembuj me çanta<select id="examples"><option value="">Zgjidh një shembull</option></select></label><label for="query">Ose kërko sipas ID-së<input id="query" placeholder="PR00080" required></label><button>Kërko</button></form>
+<details class="photo-lookup">
+<summary>Kërko me foto</summary>
+<p>Zgjidh një foto origjinale nga dosja e fotove sintetike të sfidës S-02. Kur skedari përputhet, faqja hap njoftimin dhe shfaq parashikimin ekzistues të modelit.</p>
+<form class="form" id="photo-lookup">
+<label for="photo-file">Fotoja e produktit<input type="file" id="photo-file" accept=".jpg,.jpeg,image/jpeg" required></label>
+<button>Kërko foton</button>
+</form>
+<p id="photo-status" role="status"></p>
+</details>
 <p id="lookup-status" role="status"></p>
 <div id="listing" class="listing" hidden style="display:none">
 <div><img id="photo" alt="Foto sintetike e produktit"><p id="photo-note" class="muted"></p></div>
@@ -80,6 +90,62 @@ async function start() {
     event.preventDefault();
     show(byId('query').value.trim().toUpperCase());
   });
+  const photoForm = byId('photo-lookup');
+  const photoInput = byId('photo-file');
+  const photoStatus = byId('photo-status');
+  const photoMatches = new Map();
+  for (const row of listings) {
+    const encoded = row.image_used && photos[row.image];
+    if (!encoded) continue;
+    if (!photoMatches.has(encoded)) photoMatches.set(encoded, []);
+    photoMatches.get(encoded).push(row.produkt_id);
+  }
+
+  const reader = new FileReader();
+  photoInput.addEventListener('change', () => {
+    if (reader.readyState === FileReader.LOADING) reader.abort();
+    photoStatus.replaceChildren();
+  });
+  photoForm.addEventListener('submit', event => {
+    event.preventDefault();
+    if (reader.readyState === FileReader.LOADING) reader.abort();
+    const file = photoInput.files[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      photoStatus.textContent = 'Zgjidh një skedar JPEG deri në 5 MB.';
+      return;
+    }
+    photoStatus.textContent = 'Po kërkohet fotoja…';
+    reader.readAsDataURL(file);
+  });
+  reader.addEventListener('error', () => {
+    photoStatus.textContent = 'Skedari nuk u lexua. Provo ta zgjedhësh përsëri.';
+  });
+  reader.addEventListener('load', () => {
+    const ids = photoMatches.get(reader.result.split(',', 2)[1]) ?? [];
+    if (ids.length === 0) {
+      photoStatus.textContent = 'Fotoja nuk u gjet në këtë demonstrim. Provo një skedar JPEG nga sfida, pa e ndryshuar.';
+      return;
+    }
+    if (ids.length === 1) {
+      photoStatus.textContent = 'U gjet njoftimi ' + ids[0] + '.';
+      show(ids[0]);
+      byId('predict').click();
+      return;
+    }
+    photoStatus.textContent = 'Fotoja përputhet me disa njoftime. Zgjidh një ID: ';
+    for (const id of ids) {
+      const link = document.createElement('a');
+      link.href = '#produkt';
+      link.textContent = id;
+      link.addEventListener('click', () => {
+        show(id);
+        byId('predict').click();
+      });
+      photoStatus.append(link, ' ');
+    }
+  });
+
   byId('predict').addEventListener('click', () => {
     byId('prediction').textContent = labels[current.prediction];
     byId('reasons').replaceChildren(...current.reasons.map(reason => {
