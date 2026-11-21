@@ -11,7 +11,181 @@
 <main>
 <section class="intro"><h1>Produkte origjinale, imitime dhe falsifikime</h1><p>Shqyrto një njoftim dhe shiko çfarë parashikon modeli nga çmimi, teksti, profili i shitësit dhe fotoja kur është e disponueshme.</p></section>
 <section class="section" id="produkt">
-<h2>Kontrollo produktin</h2>
+<h2>Kontrollo një produkt</h2>
+<form class="form" id="external-check">
+<label for="external-url">Linku i produktit
+<input type="url" id="external-url" placeholder="https://…" required>
+<small>Linku i ofertës i dërgohet Microlink për të gjetur foton.</small>
+</label>
+<button>Kërko</button>
+</form>
+<div id="external-result" class="result" hidden aria-live="polite">
+<h3 id="listing-verdict"></h3>
+<p id="listing-verdict-detail"></p>
+<a id="external-link" target="_blank" rel="noopener noreferrer">Hap njoftimin</a>
+<a id="listing-photo-link" target="_blank" rel="noopener noreferrer" hidden>
+<img id="listing-photo" alt="Fotoja e produktit nga njoftimi. Hap njoftimin." referrerpolicy="no-referrer" style="display:block;max-width:min(100%, 320px);height:auto;margin-top:12px">
+</a>
+<p id="listing-photo-status" role="status"></p>
+<details>
+<summary>Shto të dhënat e njoftimit</summary>
+<form class="form" id="external-details">
+<label>Marka<input id="external-brand" maxlength="100" required></label>
+<label>Çmimi<input id="external-price" type="number" min="0" step="0.01" required></label>
+<label>Monedha<select id="external-currency">
+<option value="ALL">Lekë (ALL)</option>
+<option value="EUR">Euro (EUR)</option>
+<option value="USD">Dollarë amerikanë (USD)</option>
+</select></label>
+<label>Kodi i modelit, nëse dihet<input id="external-model" maxlength="100"></label>
+<label>Fotoja e produktit (opsionale)<input id="external-photo" type="file" accept="image/*"></label>
+<button>Shfaq përmbledhjen</button>
+</form>
+<p id="external-summary" role="status"></p>
+<img id="external-photo-preview" alt="Fotoja e produktit që ngarkove" hidden style="max-width:min(100%, 320px);height:auto">
+<p id="external-photo-status" role="status"></p>
+</details>
+</div>
+<script>
+{
+  const form = document.getElementById('external-check');
+  const urlField = document.getElementById('external-url');
+  const result = document.getElementById('external-result');
+  const listingLink = document.getElementById('external-link');
+  const listingVerdict = document.getElementById('listing-verdict');
+  const listingVerdictDetail = document.getElementById('listing-verdict-detail');
+  const brandSites = new Map([
+    ['coach.com', 'Coach'],
+    ['coachoutlet.com', 'Coach Outlet'],
+    ['fjallraven.com', 'Fjällräven'],
+  ]);
+  const details = document.getElementById('external-details');
+  const summary = document.getElementById('external-summary');
+
+  const photo = document.getElementById('external-photo');
+  const photoPreview = document.getElementById('external-photo-preview');
+  const photoStatus = document.getElementById('external-photo-status');
+  const listingPhotoLink = document.getElementById('listing-photo-link');
+  const listingPhoto = document.getElementById('listing-photo');
+  const listingPhotoStatus = document.getElementById('listing-photo-status');
+  const noListingPhoto = 'Fotoja nuk u gjet. Mund ta shikosh te “Hap njoftimin”.';
+  let lookup;
+  let photoUrl;
+
+  async function loadListingPhoto(url) {
+    lookup?.abort();
+    const request = new AbortController();
+    lookup = request;
+    listingPhotoLink.hidden = true;
+    listingPhoto.removeAttribute('src');
+    listingPhotoLink.href = url.href;
+    listingPhotoStatus.textContent = 'Po kërkohet fotoja…';
+
+    const endpoint = new URL('https://api.microlink.io/');
+    endpoint.searchParams.set('url', url.href);
+    const timeout = setTimeout(() => request.abort(), 12000);
+    try {
+      const response = await fetch(endpoint, { signal: request.signal });
+      if (!response.ok) throw new Error('Photo lookup failed');
+      const { data } = await response.json();
+      const imageUrl = new URL(data?.image?.url);
+      if (imageUrl.protocol !== 'https:' || imageUrl.username || imageUrl.password) {
+        throw new Error('Invalid photo URL');
+      }
+      if (lookup === request) listingPhoto.src = imageUrl.href;
+    } catch {
+      if (lookup === request) listingPhotoStatus.textContent = noListingPhoto;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  listingPhoto.addEventListener('load', () => {
+    if (!listingPhoto.naturalWidth) return;
+    listingPhotoLink.hidden = false;
+    listingPhotoStatus.textContent = '';
+  });
+
+  listingPhoto.addEventListener('error', () => {
+    if (!listingPhoto.hasAttribute('src')) return;
+    listingPhotoLink.hidden = true;
+    listingPhotoStatus.textContent = noListingPhoto;
+  });
+
+  function clearPhoto() {
+    if (photoUrl) URL.revokeObjectURL(photoUrl);
+    photoUrl = undefined;
+    photoPreview.removeAttribute('src');
+    photoPreview.hidden = true;
+    photoStatus.textContent = '';
+  }
+
+  photo.addEventListener('change', () => {
+    clearPhoto();
+    const file = photo.files[0];
+    if (!file) return;
+    photoUrl = URL.createObjectURL(file);
+    photoPreview.src = photoUrl;
+  });
+
+  photoPreview.addEventListener('load', () => {
+    photoPreview.hidden = false;
+  });
+  photoPreview.addEventListener('error', () => {
+    clearPhoto();
+    photoStatus.textContent = 'Fotoja nuk u hap. Provo një skedar JPG ose PNG.';
+  });
+
+  urlField.addEventListener('input', () => {
+    urlField.setCustomValidity('');
+    lookup?.abort();
+    lookup = undefined;
+    result.hidden = true;
+  });
+
+  form.addEventListener('submit', event => {
+    event.preventDefault();
+    const url = new URL(urlField.value);
+    if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) {
+      urlField.setCustomValidity('Vendos një link që fillon me https:// ose http://.');
+      urlField.reportValidity();
+      return;
+    }
+    const officialBrand = url.protocol === 'https:' && !url.port
+      ? brandSites.get(url.hostname.replace(/^www\./, ''))
+      : undefined;
+    listingVerdict.textContent = officialBrand
+      ? 'Burimi i linkut: faqja zyrtare e ' + officialBrand
+      : 'Origjinaliteti mbetet i pakonfirmuar';
+    listingVerdictDetail.textContent = officialBrand
+      ? 'Linku i përket markës. Për një çantë që shitet diku tjetër, kërko prova nga shitësi.'
+      : 'Kërko fotot e çantës që po shitet dhe provën e blerjes. Fotoja e ofertës mund të kopjohet.';
+    listingLink.href = url.href;
+    details.reset();
+    clearPhoto();
+    summary.textContent = '';
+    result.hidden = false;
+    loadListingPhoto(url);
+  });
+
+  details.addEventListener('submit', event => {
+    event.preventDefault();
+    const brand = document.getElementById('external-brand').value.trim();
+    const price = Number(document.getElementById('external-price').value);
+    const currency = document.getElementById('external-currency').value;
+    const formattedPrice = currency === 'ALL'
+      ? new Intl.NumberFormat('sq-AL').format(price) + ' lekë'
+      : new Intl.NumberFormat('sq-AL', { style: 'currency', currency }).format(price);
+    const model = document.getElementById('external-model').value.trim();
+    summary.textContent = [
+      brand,
+      formattedPrice,
+      model ? 'Kodi i modelit: ' + model : 'Kërko kodin e modelit nga shitësi.'
+    ].filter(Boolean).join(' · ');
+  });
+}
+</script>
+<h3>Provo shembujt e S-02</h3>
 <form class="form" id="lookup"><label for="examples">Shembuj me çanta<select id="examples"><option value="">Zgjidh një shembull</option></select></label><label for="query">Ose kërko sipas ID-së<input id="query" placeholder="PR00080" required></label><button>Kërko</button></form>
 <details class="photo-lookup">
 <summary>Kërko me foto</summary>
